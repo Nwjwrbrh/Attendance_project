@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from database import add_student
 from pathlib import Path
 
 
@@ -16,9 +17,6 @@ RECOGNITION_MODEL = (
     / "models"
     / "face_recognition_sface_2021dec.onnx"
 )
-
-DATA_DIR = BASE_DIR / "registered_faces"
-DATA_DIR.mkdir(exist_ok=True)
 
 
 # Create YuNet detector
@@ -38,23 +36,10 @@ recognizer = cv2.FaceRecognizerSF.create(
     ""
 )
 
-
 # Get student information
 name = input("Enter student name: ")
 roll_no = input("Enter roll number: ")
-
-safe_roll_no = roll_no.replace("/", "_").replace(" ", "_")
-
-photo_path = DATA_DIR / f"{safe_roll_no}.jpg"
-embedding_path = DATA_DIR / f"{safe_roll_no}.npy"
-
-# Check if this roll number already exists
-if photo_path.exists() or embedding_path.exists():
-    print(f"\nError: Roll number '{roll_no}' is already registered.")
-    print("Registration cancelled.")
-    exit()
-
-    
+   
 # Open camera
 camera = cv2.VideoCapture(1)
 
@@ -145,32 +130,31 @@ while True:
             aligned_face
         )
 
-        # Create safe filenames
-        safe_roll_no = roll_no.replace("/", "_").replace(" ", "_")
 
-        photo_path = DATA_DIR / f"{safe_roll_no}.jpg"
-        embedding_path = DATA_DIR / f"{safe_roll_no}.npy"
+        # Convert the captured frame to JPEG bytes
+        success, photo_buffer = cv2.imencode(".jpg", frame)
 
-        # Save original camera frame
-        cv2.imwrite(
-            str(photo_path),
-            frame
-        )
+        if not success:
+            print("Error: Could not encode photo.")
+            continue
 
-        # Save face embedding
-        np.save(
-            str(embedding_path),
-            feature
-        )
+        photo_bytes = photo_buffer.tobytes()
 
-        print("\nStudent registered successfully!")
-        print(f"Name: {name}")
-        print(f"Roll No: {roll_no}")
-        print(f"Photo saved: {photo_path}")
-        print(f"Embedding saved: {embedding_path}")
-        print(f"Embedding shape: {feature.shape}")
+        # Convert SFace embedding to bytes
+        embedding_bytes = feature.astype(np.float32).tobytes()
 
-        break
+        # Save student to SQLite
+        saved = add_student(
+            name,
+            roll_no,
+            photo_bytes,
+            embedding_bytes
+            )
+        if saved:
+            print("\nStudent registered successfully!")
+            print(f"Name: {name}")
+            print(f"Roll No: {roll_no}")
+            break
 
     # Press Q to quit
     elif key == ord("q"):

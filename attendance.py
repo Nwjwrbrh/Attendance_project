@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from pathlib import Path
+from database import get_all_students, mark_attendance
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -17,35 +18,34 @@ RECOGNITION_MODEL = (
     / "face_recognition_sface_2021dec.onnx"
 )
 
-DATA_DIR = BASE_DIR / "registered_faces"
-
-
 # -----------------------------
-# Load registered face features
+# Load students from sqlite
 # -----------------------------
 
-registered_faces = {}
+students = get_all_students()
 
-for embedding_file in DATA_DIR.glob("*.npy"):
-
-    roll_no = embedding_file.stem
-
-    feature = np.load(embedding_file)
-
-    registered_faces[roll_no] = feature
-
-
-if not registered_faces:
-    print("No registered faces found.")
-    print("Please register a student first.")
+if not students:
+    print("No students registered in the database.")
     exit()
 
+registered_students = []
 
-print("Registered students:")
+for student_id, name, roll_no, embedding_bytes in students:
 
-for roll_no in registered_faces:
-    print("-", roll_no)
+    # Convert bytes from SQLite back into a NumPy array
+    embedding = np.frombuffer(
+        embedding_bytes,
+        dtype=np.float32
+    ).reshape(1, -1)
 
+    registered_students.append({
+        "id": student_id,
+        "name": name,
+        "roll_no": roll_no,
+        "embedding": embedding
+    })
+
+print(f"{len(registered_students)} students loaded.")
 
 # -----------------------------
 # Create YuNet detector
@@ -90,6 +90,8 @@ print("Press Q to quit.")
 # Recognition loop
 # -----------------------------
 
+THRESHOLD = 0.363
+
 while True:
 
     success, frame = camera.read()
@@ -101,12 +103,8 @@ while True:
 
     height, width = frame.shape[:2]
 
-
-    # Update YuNet input size
     detector.setInputSize((width, height))
 
-
-    # Detect faces
     _, faces = detector.detect(frame)
 
 
@@ -114,56 +112,75 @@ while True:
 
         for face in faces:
 
-            # Get face rectangle
             x, y, w, h = face[:4].astype(int)
 
 
-            # Align the face
+            # Align detected face
             aligned_face = recognizer.alignCrop(
                 frame,
                 face
             )
 
 
-            # Generate face feature
+            # Generate SFace embedding
             feature = recognizer.feature(
                 aligned_face
             )
 
 
-            # Variables for the best match
-            best_match = "Unknown"
+            best_student = None
             best_score = -1
 
 
-            # Compare with every registered face
-            for roll_no, registered_feature in registered_faces.items():
+            # Compare with every registered student
+            for student in registered_students:
 
                 score = recognizer.match(
                     feature,
-                    registered_feature,
+                    student["embedding"],
                     cv2.FaceRecognizerSF_FR_COSINE
                 )
-
 
                 if score > best_score:
 
                     best_score = score
-                    best_match = roll_no
+                    best_student = student
 
 
-            # Recognition threshold
-            # You can adjust this later
-            THRESHOLD = 0.363
-
+            # ----------------------------
+            # Recognized
+            # ----------------------------
 
             if best_score >= THRESHOLD:
 
-                label = f"{best_match} ({best_score:.2f})"
+                name = best_student["name"]
+                roll_no = best_student["roll_no"]
+                student_id = best_student["id"]
+
+                label = (
+                    f"{name} - {roll_no} "
+                    f"({best_score:.2f})"
+                )
+
+                marked = mark_attendance(student_id)
+
+                if marked:
+                    print(
+                        f"Attendance marked: "
+                        f"{name} ({roll_no})"
+                    )
+
+
+            # ----------------------------
+            # Unknown
+            # ----------------------------
 
             else:
 
-                label = f"Unknown ({best_score:.2f})"
+                label = (
+                    f"Unknown "
+                    f"({best_score:.2f})"
+                )
 
 
             # Draw face rectangle
@@ -176,31 +193,27 @@ while True:
             )
 
 
-            # Display result
+            # Display name/roll number
             cv2.putText(
                 frame,
                 label,
-                (x, y - 10),
+                (x, max(y - 10, 20)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
+                0.6,
                 (0, 255, 0),
                 2
             )
 
 
-    # Show camera
     cv2.imshow(
         "Face Attendance",
         frame
     )
 
 
-    # Press Q to quit
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
 
-# Release camera
 camera.release()
-
 cv2.destroyAllWindows()
