@@ -191,6 +191,34 @@ def get_attendance_records():
 
     return records
 
+
+def get_student_attendance(roll_no):
+    """Get attendance records for a specific roll number."""
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+        SELECT
+            students.name,
+            students.roll_no,
+            attendance.date,
+            attendance.time,
+            attendance.status
+        FROM attendance
+        JOIN students
+            ON attendance.student_id = students.id
+        WHERE students.roll_no = ?
+        ORDER BY attendance.date DESC, attendance.time DESC
+    """, (roll_no,))
+
+    records = cursor.fetchall()
+
+    connection.close()
+
+    return records
+
+
 if __name__ == "__main__":
     create_tables()
 

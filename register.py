@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from database import add_student
 from pathlib import Path
+import sys
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -37,8 +38,12 @@ recognizer = cv2.FaceRecognizerSF.create(
 )
 
 # Get student information
-name = input("Enter student name: ")
-roll_no = input("Enter roll number: ")
+if len(sys.argv) != 3:
+    print("Usage: python3 register.py <name> <roll_no>")
+    exit()
+
+name = sys.argv[1]
+roll_no = sys.argv[2]
    
 # Open camera
 camera = cv2.VideoCapture(1)
